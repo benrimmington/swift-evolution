@@ -132,7 +132,7 @@ struct ICalendar {
     insert(
       """
       VERSION:2.0
-      PRODID:\(UUID().uuidString)
+      PRODID:B1A7168E-065A-42D1-9E20-31F2E90FBDB1
       X-APPLE-CALENDAR-COLOR:#F05138
       X-WR-CALNAME:Swift Evolution
       NAME:Swift Evolution
@@ -150,7 +150,7 @@ struct ICalendar {
     insert(
       """
       BEGIN:VEVENT
-      UID:\(UUID().uuidString)
+      UID:B1A7168E-065A-42D1-9E20-31F2E90FBDB1-\(proposal.id)
       DTSTAMP:\(Date().iCalendarDateTimeUTC)
       SUMMARY:\(proposal.id):\u{20}
       \t\(proposal.title.iCalendarEscaped.iCalendarFolded)
