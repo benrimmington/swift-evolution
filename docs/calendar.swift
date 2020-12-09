@@ -24,8 +24,13 @@ struct Proposal: Decodable {
 
   struct Status: Decodable {
 
+    let state: String
     let start: String?
     let end: String?
+
+    var isReview: Bool {
+      state == ".scheduledForReview" || state == ".activeReview"
+    }
   }
 
   let id: String
@@ -36,60 +41,26 @@ struct Proposal: Decodable {
 
 // MARK: -
 
-extension DateInterval {
+extension ISO8601DateFormatter {
 
-  // e.g. "2020-12-31" -> 2020-12-31T00:00:00Z
-  static let _proposalDateOnlyFormatter: ISO8601DateFormatter = {
+  // e.g. "2020-12-31T09:00:00" -> 2020-12-31T17:00:00Z (9 a.m. Pacific Time).
+  static let withPacificTimeZone: ISO8601DateFormatter = {
     let result = ISO8601DateFormatter()
-    result.formatOptions = [.withFullDate]
-    result.timeZone = TimeZone(secondsFromGMT: 0)!
+    result.formatOptions.subtract([.withTimeZone])
+    result.timeZone = TimeZone(identifier: "America/Los_Angeles")!
     return result
   }()
 
-  // Accepts any proposal with valid `start` and `end` strings.
-  init?(_ proposal: Proposal) {
-    guard
-      let start = proposal.status.start.flatMap({
-        Self._proposalDateOnlyFormatter.date(from: $0)
-      }),
-      let end = proposal.status.end.flatMap({
-        Self._proposalDateOnlyFormatter.date(from: $0)
-      }),
-      start <= end
-    else {
-      return nil
-    }
-    self.init(start: start, end: end)
-  }
-
-  // Will be used to trigger a VALARM on the final day.
-  var iCalendarDuration: String {
-    let days = Calendar.current.dateComponents([.day], from: start, to: end).day
-    return "P\(days ?? 0)D"
-  }
-}
-
-// MARK: -
-
-extension Date {
-
-  // e.g. 2020-12-31T23:59:59Z -> "20201231"
-  var iCalendarDateOnly: String {
-    ISO8601DateFormatter.string(
-      from: self,
-      timeZone: TimeZone(secondsFromGMT: 0)!,
-      formatOptions: [.withYear, .withMonth, .withDay]
-    )
-  }
-
-  // e.g. 2020-12-31T23:59:59Z -> "20201231T235959Z"
-  var iCalendarDateTimeUTC: String {
-    ISO8601DateFormatter.string(
-      from: self,
-      timeZone: TimeZone(secondsFromGMT: 0)!,
-      formatOptions: [.withYear, .withMonth, .withDay, .withTime, .withTimeZone]
-    )
-  }
+  // e.g. 2020-12-31T17:00:00Z -> "20201231T170000Z" (iCalendar DATE-TIME).
+  static let withoutSeparators: ISO8601DateFormatter = {
+    let result = ISO8601DateFormatter()
+    result.formatOptions.subtract([
+      .withDashSeparatorInDate,
+      .withColonSeparatorInTime,
+      .withColonSeparatorInTimeZone,
+    ])
+    return result
+  }()
 }
 
 // MARK: -
@@ -132,7 +103,7 @@ struct ICalendar {
     insert(
       """
       VERSION:2.0
-      PRODID:B1A7168E-065A-42D1-9E20-31F2E90FBDB1
+      PRODID:\(UUID().uuidString)
       X-APPLE-CALENDAR-COLOR:#F05138
       X-WR-CALNAME:Swift Evolution
       NAME:Swift Evolution
@@ -142,29 +113,29 @@ struct ICalendar {
 
   // VEVENT must have UID, DTSTAMP, and DTSTART.
   // VALARM must have ACTION and TRIGGER.
-  // `T090000` and `PT0S` are at 9 a.m. in local "floating" time.
   mutating func insert(_ proposal: Proposal) {
-    guard let dateInterval = DateInterval(proposal) else {
+    guard
+      proposal.status.isReview,
+      let start: Date = proposal.status.start.flatMap({
+        ISO8601DateFormatter.withPacificTimeZone.date(from: $0 + "T09:00:00")
+      })
+    else {
       return
     }
     insert(
       """
       BEGIN:VEVENT
-      UID:B1A7168E-065A-42D1-9E20-31F2E90FBDB1-\(proposal.id)
-      DTSTAMP:\(Date().iCalendarDateTimeUTC)
+      UID:\(UUID().uuidString)
+      DTSTAMP:\(ISO8601DateFormatter.withoutSeparators.string(from: Date()))
       SUMMARY:\(proposal.id):\u{20}
       \t\(proposal.title.iCalendarEscaped.iCalendarFolded)
       URL:https://github.com/apple/swift-evolution/blob/main/proposals/
       \t\(proposal.link.iCalendarFolded)
-      DTSTART:\(dateInterval.start.iCalendarDateOnly)T090000
+      DTSTART:\(ISO8601DateFormatter.withoutSeparators.string(from: start))
       TRANSP:TRANSPARENT
       BEGIN:VALARM
       ACTION:AUDIO
       TRIGGER:PT0S
-      END:VALARM
-      BEGIN:VALARM
-      ACTION:AUDIO
-      TRIGGER:\(dateInterval.iCalendarDuration)
       END:VALARM
       END:VEVENT
       """
